@@ -8,19 +8,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 import base64
-
-home_url = 'https://www.designgurus.io/'
-course_url = 'https://www.designgurus.io/course/grokking-the-system-design-interview'
-test_access_url = 'https://www.designgurus.io/course-play/grokking-the-system-design-interview/doc/638c0b75ac93e7ae59a1b071'
-
-# headless mode doesn't work because Google blocks it from logging in
-driver = Chrome()
-# driver.set_window_size(1920, 1080) 
-
-with open('login.json', 'r') as f:
-    login = json.load(f)
-    email = login[0]["email"]
-    password = login[0]["password"]
+import tqdm
 
 
 def auto_login(driver, home_url, email, password, retry=3):
@@ -98,7 +86,7 @@ def close_cookie_popup(driver):
         print("No cookie popup was detected.")
 
 
-def get_course_content_url(driver: Chrome, course_url):
+def get_course_content_url(driver: Chrome, course_url, download_url=True):
     """
     Given a course URL, return all the URLs of the course content page, and save to json file
     """
@@ -137,6 +125,7 @@ def get_course_content_url(driver: Chrome, course_url):
     # Get the URLs of the course content pages
     course_content_all = driver.find_element(By.XPATH, "//div[contains(@class, 'courseContent_courseContent__overviewWrapper')]")
     chapter_elements = course_content_all.find_elements(By.XPATH, "div[contains(@class, 'MuiBox-root')]")
+    chapter_list = []
     for element in chapter_elements:
         try:
             # Get chapter title
@@ -146,21 +135,31 @@ def get_course_content_url(driver: Chrome, course_url):
             chapter_name = chapter_number + " " + chapter_title  
             print(chapter_name)
 
+            document_list = []
             # Get the URLs of the chapter content pages
             chapter_documents = element.find_elements(By.XPATH, ".//a[contains(@class, 'courseContent_courseContent__documentTitleWrapper')]")
             print("Number of documents:", len(chapter_documents))
             for document in chapter_documents:
                 document_url = document.get_attribute('href')
                 document_title = document.find_element(By.XPATH, ".//div[contains(@class, 'courseContent_courseContent__documentTitle__xqObJ')]").text
-                print(f"{document_title}: {document_url}")
+                document_list.append({"title": document_title, "url": document_url})
+            
+            chapter_list.append({"chapter": chapter_name, "documents": document_list})
 
         except Exception as e:  # It's better to catch specific exceptions, but for debugging, this is okay
             print("Error retrieving chapter information:", e)
+    
+    if download_url:
+        course_json = json.dumps(chapter_list, indent=2)
+        course_name = course_url.split('/')[-1]
+        with open(f"{course_name}.json", 'w') as f:
+            f.write(course_json)
+    return chapter_list
 
         
 
 
-def print_to_pdf(driver: Chrome, url):
+def print_to_pdf(driver: Chrome, url, path):
     """
     Print the course content page to PDF
     """
@@ -181,15 +180,54 @@ def print_to_pdf(driver: Chrome, url):
 
     # Get the PDF data and save it to a file
     pdf_data = result['data']
-    with open('test.pdf', 'wb') as file:
+    with open(f"{path}.pdf", 'wb') as file:
         file.write(base64.b64decode(pdf_data))
 
 
 if __name__ == "__main__":
+    home_url = 'https://www.designgurus.io/'
+    course_urls = [
+        "https://www.designgurus.io/course/grokking-system-design-fundamentals",
+        # ...
+    ]
+
+    # headless mode doesn't work because Google blocks it from logging in
+    driver = Chrome()
+    # driver.set_window_size(1920, 1080) 
+
+    with open('login.json', 'r') as f:
+        login = json.load(f)
+        email = login[0]["email"]
+        password = login[0]["password"]
+
     status_code = auto_login(driver, home_url, email, password)
-    if status_code == 0:
-        get_course_content_url(driver, course_url)
-        # print_to_pdf(driver, test_access_url)
+    if status_code == 0:   # login succeeded
+        for course_url in course_urls:
+            course_content_urls = get_course_content_url(driver, course_url)
+            course_name = course_url.split('/')[-1]
+            if not os.path.exists(course_name):
+                os.makedirs(course_name)
+            
+            for chapter_element in tqdm.tqdm(course_content_urls, desc="Downloading chapters"):
+                chapter_name = chapter_element["chapter"]
+                chapter_name = chapter_name.replace('/', '-')
+                chapter_folder = os.path.join(course_name, chapter_name)
+                if not os.path.exists(chapter_folder):
+                    os.makedirs(chapter_folder)
+                doc_num = 1
+                for document in tqdm.tqdm(chapter_element["documents"], desc="Downloading documents"):
+                    document_title = document["title"]
+                    document_title = document_title.replace('/', '-')
+                    document_title = str(doc_num) + ". " + document_title
+                    document_url = document["url"]
+                    retry = 3
+                    while retry > 0:
+                        try:
+                            print_to_pdf(driver, document_url, os.path.join(chapter_folder, document_title))
+                            retry = 0
+                        except:
+                            retry -= 1
+                    doc_num += 1
     driver.quit()
 
 
