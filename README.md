@@ -8,6 +8,7 @@ Tool: selenium, undetected chromedriver
 ---
 
 ## 2. MovieAPI
-Java Spring Boot tutorial \
+[Java Spring Boot tutorial](https://www.youtube.com/watch?v=5PdEmeopJVQ&t=298s) \
 Frontend: React.js \
-Database: MongoDB 
+Database: MongoDB \
+Features yet to be completed: navigation bar, trailer and video play button, movie reviews
